@@ -1,6 +1,5 @@
-import datetime
 from enum import Enum
-from typing import Optional, List, Any
+from typing import Optional
 
 import requests
 
@@ -46,18 +45,23 @@ class DeeplApi:
 	def translate(
 			self,
 			text: str,
-			target_language: DeeplApiLanguage = DeeplApiLanguage.English,
+			target_language: DeeplApiLanguage,
 			source_language: Optional[DeeplApiLanguage] = None
 	) -> str:
+		data_dict: dict[str, str] = dict(
+			text=text,
+			target_lang=target_language.value
+		)
+
+		if source_language is not None:
+			data_dict['source_lang'] = source_language.value
+
 		response: requests.Response = requests.post(
 			url=type(self)._BASE_API,
 			params=dict(
 				auth_key=self._token
 			),
-			data=dict(
-				text=text,
-				target_lang=target_language.value
-			),
+			data=data_dict,
 			timeout=type(self)._REQUEST_TIMEOUT
 		)
 		response.raise_for_status()
