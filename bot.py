@@ -46,26 +46,16 @@ async def _parse_translate_argument(
 	except Exception as e:
 		print(f"{e!r}")
 
-	return None
+	raise ArgumentParsingError(f"Could not parse {raw_argument} as a language or member")
 
 
 async def _parse_translate_arguments(context: Context, arguments: tuple[str]) -> TranslateArguments:
 	if len(arguments) > 3:
 		raise TooManyArguments(f"Command only takes a maximum of 3 arguments, but {len(arguments)} were given.")
 
-	parsed_arguments: list[Optional[Union[DeeplApiLanguage, discord.Member]]] = []
-	for argument in arguments:
-		parsed_argument: Optional[Union[DeeplApiLanguage, discord.Member]] = await _parse_translate_argument(
-			context, argument
-		)
-
-		if parsed_argument is None:
-			raise ArgumentParsingError(f"Could not parse {argument} as a language or member")
-		parsed_arguments.append(parsed_argument)
-
-	# If there's a member,
-	if len(parsed_arguments) == 3 and isinstance(parsed_arguments[1], discord.Member):
-		raise BadArgument(f"Member arguments must be present at the beginning or end of the list of arguments.")
+	parsed_arguments: list[Union[DeeplApiLanguage, discord.Member]] = list(map(
+		lambda argument: await _parse_translate_argument(context, argument), arguments
+	))
 
 	languages: list[DeeplApiLanguage] = []
 	members: list[discord.Member] = []
@@ -81,12 +71,19 @@ async def _parse_translate_arguments(context: Context, arguments: tuple[str]) ->
 	if len(languages) > 2:
 		raise BadArgument(f"A maximum of 2 languages can be given as arguments.")
 
+	# If there's a member, it has to be either at the beginning or at the end of the argument list
+	if len(members) == 1 and len(parsed_arguments) == 3 and isinstance(parsed_arguments[1], discord.Member):
+		raise BadArgument(f"Member arguments must be present at the beginning or end of the list of arguments.")
+
 	target_language: Optional[DeeplApiLanguage]
 	source_language: Optional[DeeplApiLanguage]
 
 	if len(languages) == 2:
 		# When given two languages, first is source, and second is target
 		source_language, target_language = languages
+
+		if source_language == target_language:
+			raise BadArgument("Target and source languages can't be the same.")
 	elif len(languages) == 1:
 		# If only one language is present, it has to be the target, since the source can be guessed
 		source_language, target_language = None, languages[0]
