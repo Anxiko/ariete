@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Optional, Union, Callable, Coroutine, Iterable, AsyncIterable
 
 import discord
 from discord.ext import commands
@@ -53,9 +53,9 @@ async def _parse_translate_arguments(context: Context, arguments: tuple[str]) ->
 	if len(arguments) > 3:
 		raise TooManyArguments(f"Command only takes a maximum of 3 arguments, but {len(arguments)} were given.")
 
-	parsed_arguments: list[Union[DeeplApiLanguage, discord.Member]] = list(map(
-		lambda argument: await _parse_translate_argument(context, argument), arguments
-	))
+	parsed_arguments: list[Union[DeeplApiLanguage, discord.Member]] = [
+		await _parse_translate_argument(context, argument) for argument in arguments
+	]
 
 	languages: list[DeeplApiLanguage] = []
 	members: list[discord.Member] = []
@@ -102,15 +102,27 @@ async def _parse_translate_arguments(context: Context, arguments: tuple[str]) ->
 async def translate(context: commands.Context, *args: str) -> None:
 	translate_arguments: TranslateArguments = await _parse_translate_arguments(context, args)
 
-	message: discord.Message
-	async for message in context.history(limit=_MESSAGE_HISTORY_LIMIT):
-		if message.author == bot.user or context.message == message:
-			continue
-		if translate_arguments.target_member is not None and translate_arguments.target_member != message.author:
-			continue  # TODO: get history directly from member, when target member is specified
-		if message.content.startswith(_COMMAND_PREFIX):
-			continue
+	if translate_arguments.target_member == bot.user:
+		raise BadArgument(f"Can't translate messages sent by the bot.")
 
+	message: discord.Message
+	"""
+	There doesn't seem to be a good way to get a member's history within a channel.
+	It would seem that a member's history() method should do it, but this history corresponds to DMs, not to the channel.
+	"""
+	async for message in context.history(limit=_MESSAGE_HISTORY_LIMIT):
+		if (
+				message.author == bot.user  # Ignore messages sent by this bot
+				or
+				context.message == message  # Ignore the message that triggered this invocation
+				or
+				# Just to be safe, ignore all commands that start with the command prefix
+				message.content.startswith(_COMMAND_PREFIX)  # TODO: could this check be less broad?
+				or
+				# Ignore if message author does not match specified target member (if any were given)
+				(translate_arguments.target_member is not None and translate_arguments.target_member != message.author)
+		):
+			continue
 		translated_text: str = translator.translate(
 			message.content,
 			target_language=translate_arguments.target_language,
@@ -119,7 +131,15 @@ async def translate(context: commands.Context, *args: str) -> None:
 		await context.send(translated_text)
 		break
 	else:
-		await context.send("Found no message to translate")
+		raise commands.MessageNotFound("Found no message to translate.")
+
+
+@translate.error
+async def translate_error_handler(context: commands.Context, error: commands.CommandError) -> None:
+	if isinstance(error, commands.UserInputError):
+		await context.send(f"User error:\n```{error}```")
+	else:
+		await context.send(f"Unknown error.")  # TODO: log errors
 
 
 if __name__ == '__main__':
