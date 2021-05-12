@@ -150,7 +150,8 @@ async def translate(context: commands.Context, *args: str) -> None:
 		target_language=translate_arguments.target_language,
 		source_language=translate_arguments.source_language
 	)
-	await context.send(translated_text)
+
+	await target_message.reply(translated_text)
 
 
 @translate.error
