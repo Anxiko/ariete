@@ -105,33 +105,52 @@ async def translate(context: commands.Context, *args: str) -> None:
 	if translate_arguments.target_member == bot.user:
 		raise BadArgument(f"Can't translate messages sent by the bot.")
 
-	message: discord.Message
-	"""
-	There doesn't seem to be a good way to get a member's history within a channel.
-	It would seem that a member's history() method should do it, but this history corresponds to DMs, not to the channel.
-	"""
-	async for message in context.history(limit=_MESSAGE_HISTORY_LIMIT):
-		if (
-				message.author == bot.user  # Ignore messages sent by this bot
-				or
-				context.message == message  # Ignore the message that triggered this invocation
-				or
-				# Just to be safe, ignore all commands that start with the command prefix
-				message.content.startswith(_COMMAND_PREFIX)  # TODO: could this check be less broad?
-				or
-				# Ignore if message author does not match specified target member (if any were given)
-				(translate_arguments.target_member is not None and translate_arguments.target_member != message.author)
-		):
-			continue
-		translated_text: str = translator.translate(
-			message.content,
-			target_language=translate_arguments.target_language,
-			source_language=translate_arguments.source_language
-		)
-		await context.send(translated_text)
-		break
+	target_message: discord.Message
+
+	invocation_message: discord.Message = context.message
+	if invocation_message.reference is not None:
+		# If this message is a reply, the text to translate is the text replied to
+		target_message = invocation_message.reference.resolved  # TODO: this has a chance at failing, handle possible exception?
+		if not isinstance(target_message, discord.Message):
+			raise commands.CommandError("Could not extract message from reply")
+		if translate_arguments.target_member is not None:
+			raise BadArgument("Target member shouldn't be specified on replies")
 	else:
-		raise commands.MessageNotFound("Found no message to translate.")
+		# If the invocation isn't a reply, fetch the first valid message from the channel to translate
+
+		"""
+		There doesn't seem to be a good way to get a member's history within a channel.
+		It would seem that a member's history() method should do it, but this history corresponds to DMs, not to the channel.
+		"""
+		message_in_history: discord.Message
+		async for message_in_history in context.history(limit=_MESSAGE_HISTORY_LIMIT):
+			if (
+					message_in_history.author != bot.user  # Ignore messages sent by this bot
+					and
+					context.message != message_in_history  # Ignore the message that triggered this invocation
+					and
+					# Just to be safe, ignore all commands that start with the command prefix
+					# TODO: could this check be less broad?
+					(not message_in_history.content.startswith(_COMMAND_PREFIX))
+					and
+					# Ignore if message author does not match specified target member (if any were given)
+					(
+							translate_arguments.target_member is None
+							or
+							translate_arguments.target_member == message_in_history.author
+					)
+			):
+				target_message = message_in_history
+				break
+		else:
+			raise commands.BadArgument("Found no message to translate.")
+
+	translated_text: str = translator.translate(
+		target_message.content,
+		target_language=translate_arguments.target_language,
+		source_language=translate_arguments.source_language
+	)
+	await context.send(translated_text)
 
 
 @translate.error
